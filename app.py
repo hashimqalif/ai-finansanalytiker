@@ -47,12 +47,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_code=True)
 
-# Initiera Supabase-anslutning säkert
+# Initiera anslutningar säkert
 supabase_url = os.environ.get("SUPABASE_URL", "")
 supabase_key = os.environ.get("SUPABASE_ANON_KEY", "")
 api_key = os.environ.get("OPENAI_API_KEY", "")
 
-# Initiera sessionshantering säkert
+# Initiera sessionshantering
 if "user_authenticated" not in st.session_state:
     st.session_state["user_authenticated"] = False
 if "user_email" not in st.session_state:
@@ -206,3 +206,4 @@ with flik_verktyg:
         if supabase_url and supabase_key:
             db_data = pd.DataFrame()
             try:
+                sb_client = initiera_supabase(supabase_url, supabase_key)
