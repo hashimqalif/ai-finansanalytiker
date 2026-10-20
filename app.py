@@ -47,7 +47,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_code=True)
 
-# Initiera anslutningar
+# Initiera nycklar
 supabase_url = os.environ.get("SUPABASE_URL", "")
 supabase_key = os.environ.get("SUPABASE_ANON_KEY", "")
 api_key = os.environ.get("OPENAI_API_KEY", "")
