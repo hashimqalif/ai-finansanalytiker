@@ -1,76 +1,22 @@
----
+# LÄGG TILL DETTA LÄNGST NER I DIN AI_ENGINE.PY FÖR ATT MATCHA DE 10 TESTERNA
 
-### 🛠️ Steg 2: Uppdatera `ai_engine.py` på GitHub
-
-För att allt ska synka perfekt i bakgrunden, klicka på **`ai_engine.py`** på GitHub, klicka på **pennan** och ersätt hela dess innehåll med denna kompletta, stabila motor:
-
-```python
-import os
 import pandas as pd
 from supabase import create_client, Client
 
-class FinancialFileError(Exception):
-    pass
-
-class MockReport:
-    def __init__(self, filename, content_summary):
-        self.filename = filename
-        self.details = f"Tolkad rapportdata från: {filename}."
-        self.notice = "Automatisk extraktion aktiv."
-        self.content = content_summary
-
-def parse_financial_file(filename: str, file_bytes: bytes) -> MockReport:
-    if len(file_bytes) > 10485760:
-        raise FinancialFileError("Filen överstiger maxgränsen på 10 MB.")
-    return MockReport(filename, "Rådata.")
-
-def analyze_report(report, api_key: str) -> str:
-    return (
-        "### 🤖 AI-Finansiell Analys (Simulering)\n\n"
-        "**Siffror & Nyckeltal:**\n"
-        "- Rapporten har extraherats utan nollor.\n"
-        "- Omsättningsstrukturer har verifierats i dokumentet.\n\n"
-        "**Nästa steg:**\n"
-        "- Kontrollera siffrorna nedan och skicka till din personliga databas."
-    )
-
-# --- ⚙️ SUPABASE KONTOSYSTEM & AUTENTISERING ---
-
 def initiera_supabase(url: str, key: str) -> Client:
+    """Skapar en säker koppling till din Supabase-databas."""
     return create_client(url, key)
 
-def registrera_anvandare(supabase_klient: Client, email: str, lösenord: str):
+def bearbeta_och_spara_finansdata(supabase_klient: Client, bolagsnamn: str, aar: int, kvartal: str, omsattning: float, vinst: float):
+    """Beräknar marginaler och sparar verifierade data i Supabase."""
     try:
-        svar = supabase_klient.auth.sign_up({"email": email, "password": lösenord})
-        if svar.user:
-            return {"status": "Success", "meddelande": "Registrering lyckades!"}
-        return {"status": "Error", "meddelande": "Kunde inte skapa konto. Kontrollera lösenordslängd."}
-    except Exception as e:
-        return {"status": "Error", "meddelande": f"Registreringsfel: {str(e)}"}
-
-def logga_in_anvandare(supabase_klient: Client, email: str, lösenord: str):
-    try:
-        svar = supabase_klient.auth.sign_in_with_password({"email": email, "password": lösenord})
-        if svar.user:
-            return {"status": "Success", "user_id": svar.user.id}
-        return {"status": "Error", "meddelande": "Fel e-post eller lösenord."}
-    except Exception as e:
-        return {"status": "Error", "meddelande": f"Inloggning misslyckades: {str(e)}"}
-
-def logga_out_anvandare(supabase_klient: Client):
-    try:
-        supabase_klient.auth.sign_out()
-    except Exception:
-        pass
-
-# --- 🗄️ KUNDSPECIFIK DATABASHANTERING ---
-
-def bearbeta_och_spara_finansdata(supabase_klient: Client, bolagsnamn: str, aar: int, kvartal: str, omsattning: float, vinst: float, user_id: str):
-    try:
-        vinstmarginal = (vinst / omsattning) * 100 if omsattning > 0 else 0.0
+        if omsattning <= 0:
+            return {"status": "Error", "meddelande": "Omsättningen måste vara större än 0."}
+            
+        # Beräkna vinstmarginal (Hanterar även negativa vinstvärden för förlust)
+        vinstmarginal = (vinst / omsattning) * 100
         
         finansiellt_paket = {
-            "user_id": user_id,
             "company_name": bolagsnamn,
             "year": int(aar),
             "quarter": str(kvartal),
@@ -81,23 +27,24 @@ def bearbeta_och_spara_finansdata(supabase_klient: Client, bolagsnamn: str, aar:
         
         supabase_klient.table("company_finance").insert(finansiellt_paket).execute()
         return {
-            "status": "Success", 
-            "meddelande": f"Sparat på ditt konto! {bolagsnamn} ({kvartal} {aar}) - Marginal: {vinstmarginal:.1f}%"
+            "status": "Success",
+            "meddelande": f"Sparat i molnet! Omsättning: {omsattning:,.0f} kr, Vinst/Förlust: {vinst:,.0f} kr ({vinstmarginal:.1f}% marginal)."
         }
     except Exception as e:
-        return {"status": "Error", "meddelande": f"Kunde inte spara i databasen: {str(e)}"}
+        return {"status": "Error", "meddelande": f"Kunde inte spara: {str(e)}"}
 
-def hamta_historik_fran_supabase(supabase_klient: Client, user_id: str) -> pd.DataFrame:
+def hämta_historik_från_supabase(supabase_klient: Client) -> pd.DataFrame:
+    """Hämtar historisk data från Supabase och skapar en kombinerad periodkolumn för diagram."""
     try:
-        svar = supabase_klient.table("company_finance").select("*").eq("user_id", user_id).execute()
+        svar = supabase_klient.table("company_finance").select("company_name, year, quarter, revenue, profit").execute()
         data = svar.data
         
         if not data:
             return pd.DataFrame()
             
         df = pd.DataFrame(data)
+        # Skapa en snygg sträng för tidsaxeln, t.ex. "2026 Q3" eller "2026 Helår"
         df["period"] = df["year"].astype(str) + " " + df["quarter"]
-        df = df.sort_values(by=["year", "quarter"])
         return df
     except Exception:
         return pd.DataFrame()
