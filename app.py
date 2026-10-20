@@ -1,250 +1,263 @@
-import os
-import streamlit as st
-import pandas as pd
+#region Using declarations
+using System;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using NinjaTrader.Cbi;
+using NinjaTrader.NinjaScript.Indicators;
+#endregion
 
-from ai_engine import FinancialFileError, analyze_report, parse_financial_file
-from ai_engine import (
-    initiera_supabase,
-    bearbeta_och_spara_finansdata,
-    hamta_historik_fran_supabase,
-    registrera_anvandare,
-    logga_in_anvandare,
-)
+// NQ/MNQ Trend & Pullback-robot för NinjaTrader 8
+// Chart: NQ eller MNQ, 5 minuter.
+// Regler:
+//   Trend:   EMA 20 > EMA 50 (long) / EMA 20 < EMA 50 (short)
+//   Filter:  Pris över sessions-VWAP (long) / under (short)
+//   Entry:   Pullback till EMA 20 inom senaste N staplar, sedan bekräftelsestapel
+//            som stänger tillbaka i trendens riktning (OnBarClose)
+//   Risk:    ATR-baserad stop och target, max 1 position, daglig maxförlust-spärr,
+//            max antal trades per dag, handel bara inom tidsfönster, flat före stängning
+namespace NinjaTrader.NinjaScript.Strategies
+{
+    public class NQTrendPullbackBot : Strategy
+    {
+        private EMA emaFast;
+        private EMA emaSlow;
+        private ATR atr;
 
-# 🏢 PREMIUM LIGHT FINTECH THEMING (HÖG KONTRAST & DESIGN)
-st.set_page_config(page_title="NQ Trading Bot Portal", page_icon="🤖", layout="wide")
+        private double cumPV;
+        private double cumVol;
+        private double vwap;
+        private bool dailyLocked;
+        private int tradesToday;
 
-# Custom CSS för ljust, krispigt och supertydligt fintech-tema
-st.markdown("""
-    <style>
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        background-color: #F8FAFC !important;
-        color: #1E293B !important;
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Description = "NQ/MNQ Trend & Pullback (EMA20/50, VWAP, ATR, daily lock)";
+                Name = "NQTrendPullbackBot";
+                Calculate = Calculate.OnBarClose;
+                EntriesPerDirection = 1;
+                EntryHandling = EntryHandling.AllEntries;
+                IsExitOnSessionCloseStrategy = true;
+                ExitOnSessionCloseSeconds = 30;
+                IsFillLimitOnTouch = false;
+                MaximumBarsLookBack = MaximumBarsLookBack.TwoHundredFiftySix;
+                OrderFillResolution = OrderFillResolution.Standard;
+                Slippage = 0;
+                StartBehavior = StartBehavior.WaitUntilFlat;
+                TimeInForce = TimeInForce.Gtc;
+                TraceOrders = false;
+                RealtimeErrorHandling = RealtimeErrorHandling.StopCancelClose;
+                StopTargetHandling = StopTargetHandling.PerEntryExecution;
+                BarsRequiredToTrade = 60;
+                IsInstantiatedOnEachOptimizationIteration = true;
+
+                OrderQuantity = 1;
+                EmaFastPeriod = 20;
+                EmaSlowPeriod = 50;
+                AtrPeriod = 14;
+                StopAtrMult = 1.5;
+                TargetAtrMult = 3.0;
+                PullbackBars = 3;
+                MaxDailyLoss = 500;
+                MaxTradesPerDay = 5;
+                // Tider i diagrammets tidszon (HHMMSS). Standard = svensk tid (NQ RTH 15:30-22:00).
+                StartTime = 153500;
+                EndTime = 213000;
+                CloseTime = 215500;
+            }
+            else if (State == State.DataLoaded)
+            {
+                emaFast = EMA(EmaFastPeriod);
+                emaSlow = EMA(EmaSlowPeriod);
+                atr = ATR(AtrPeriod);
+                AddChartIndicator(emaFast);
+                AddChartIndicator(emaSlow);
+            }
+        }
+
+        protected override void OnBarUpdate()
+        {
+            if (BarsInProgress != 0)
+                return;
+
+            // --- Sessions-VWAP (nollställs vid ny session) ---
+            if (Bars.IsFirstBarOfSession)
+            {
+                cumPV = 0;
+                cumVol = 0;
+                dailyLocked = false;
+                tradesToday = 0;
+            }
+            double typical = (High[0] + Low[0] + Close[0]) / 3.0;
+            cumPV += typical * Volume[0];
+            cumVol += Volume[0];
+            vwap = cumVol > 0 ? cumPV / cumVol : Close[0];
+
+            if (CurrentBar < BarsRequiredToTrade)
+                return;
+
+            int now = ToTime(Time[0]);
+
+            // --- Flat före stängning ---
+            if (now >= CloseTime)
+            {
+                FlattenAll("TimeClose");
+                return;
+            }
+
+            // --- Daglig maxförlust-spärr ---
+            if (!dailyLocked && GetSessionPnL() <= -MaxDailyLoss)
+            {
+                dailyLocked = true;
+                Print(Time[0] + " DAILY LOCK aktiverad. Dagens P&L: " + GetSessionPnL().ToString("F2"));
+            }
+            if (dailyLocked)
+            {
+                FlattenAll("DailyLock");
+                return;
+            }
+
+            // --- Entry-regler: bara flat, inom tidsfönster, under max antal trades ---
+            if (Position.MarketPosition != MarketPosition.Flat)
+                return;
+            if (now < StartTime || now >= EndTime)
+                return;
+            if (tradesToday >= MaxTradesPerDay)
+                return;
+
+            double stopTicks = Math.Max(4, Math.Round(atr[0] * StopAtrMult / TickSize));
+            double targetTicks = Math.Max(4, Math.Round(atr[0] * TargetAtrMult / TickSize));
+
+            bool upTrend = emaFast[0] > emaSlow[0];
+            bool downTrend = emaFast[0] < emaSlow[0];
+
+            bool pulledBackLong = false;
+            bool pulledBackShort = false;
+            for (int i = 1; i <= PullbackBars; i++)
+            {
+                if (Low[i] <= emaFast[i]) pulledBackLong = true;
+                if (High[i] >= emaFast[i]) pulledBackShort = true;
+            }
+
+            bool longSignal = upTrend
+                && Close[0] > vwap
+                && pulledBackLong
+                && Close[0] > emaFast[0]
+                && Close[0] > Open[0];
+
+            bool shortSignal = downTrend
+                && Close[0] < vwap
+                && pulledBackShort
+                && Close[0] < emaFast[0]
+                && Close[0] < Open[0];
+
+            if (longSignal)
+            {
+                SetStopLoss("Long", CalculationMode.Ticks, stopTicks, false);
+                SetProfitTarget("Long", CalculationMode.Ticks, targetTicks);
+                EnterLong(OrderQuantity, "Long");
+                tradesToday++;
+                Print(Time[0] + " LONG signal. Stop " + stopTicks + " ticks, target " + targetTicks + " ticks.");
+            }
+            else if (shortSignal)
+            {
+                SetStopLoss("Short", CalculationMode.Ticks, stopTicks, false);
+                SetProfitTarget("Short", CalculationMode.Ticks, targetTicks);
+                EnterShort(OrderQuantity, "Short");
+                tradesToday++;
+                Print(Time[0] + " SHORT signal. Stop " + stopTicks + " ticks, target " + targetTicks + " ticks.");
+            }
+        }
+
+        private void FlattenAll(string reason)
+        {
+            if (Position.MarketPosition == MarketPosition.Long)
+                ExitLong("Exit " + reason, "Long");
+            else if (Position.MarketPosition == MarketPosition.Short)
+                ExitShort("Exit " + reason, "Short");
+        }
+
+        // Dagens realiserade + orealiserade resultat i valuta
+        private double GetSessionPnL()
+        {
+            double pnl = 0;
+            DateTime today = Time[0].Date;
+
+            for (int i = SystemPerformance.AllTrades.Count - 1; i >= 0; i--)
+            {
+                Trade t = SystemPerformance.AllTrades[i];
+                if (t.Exit.Time.Date != today)
+                    break;
+                pnl += t.ProfitCurrency - t.Commission;
+            }
+
+            if (Position.MarketPosition != MarketPosition.Flat)
+                pnl += Position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, Close[0]);
+
+            return pnl;
+        }
+
+        #region Properties
+        [NinjaScriptProperty]
+        [Range(1, 100)]
+        [Display(Name = "Antal kontrakt", Order = 1, GroupName = "1. Position")]
+        public int OrderQuantity { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(2, 200)]
+        [Display(Name = "EMA snabb", Order = 1, GroupName = "2. Indikatorer")]
+        public int EmaFastPeriod { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(3, 400)]
+        [Display(Name = "EMA långsam", Order = 2, GroupName = "2. Indikatorer")]
+        public int EmaSlowPeriod { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(2, 100)]
+        [Display(Name = "ATR-period", Order = 3, GroupName = "2. Indikatorer")]
+        public int AtrPeriod { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 10)]
+        [Display(Name = "Pullback-staplar (lookback)", Order = 4, GroupName = "2. Indikatorer")]
+        public int PullbackBars { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0.1, 10.0)]
+        [Display(Name = "Stop (x ATR)", Order = 1, GroupName = "3. Risk")]
+        public double StopAtrMult { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0.1, 20.0)]
+        [Display(Name = "Target (x ATR)", Order = 2, GroupName = "3. Risk")]
+        public double TargetAtrMult { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 1000000)]
+        [Display(Name = "Max daglig förlust (USD)", Order = 3, GroupName = "3. Risk")]
+        public double MaxDailyLoss { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 100)]
+        [Display(Name = "Max trades per dag", Order = 4, GroupName = "3. Risk")]
+        public int MaxTradesPerDay { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 235959)]
+        [Display(Name = "Starttid (HHMMSS)", Order = 1, GroupName = "4. Tid")]
+        public int StartTime { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 235959)]
+        [Display(Name = "Sista entry-tid (HHMMSS)", Order = 2, GroupName = "4. Tid")]
+        public int EndTime { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 235959)]
+        [Display(Name = "Stäng alla positioner (HHMMSS)", Order = 3, GroupName = "4. Tid")]
+        public int CloseTime { get; set; }
+        #endregion
     }
-    [data-testid="stSidebar"] {
-        background-color: #0F172A !important;
-        color: #FFFFFF !important;
-    }
-    [data-testid="stSidebar"] p, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
-    [data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
-        color: #FFFFFF !important;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 12px;
-        background-color: #E2E8F0;
-        padding: 6px;
-        border-radius: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        border-radius: 6px;
-        color: #475569;
-        padding: 8px 16px;
-        font-weight: 500;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF !important;
-        color: #0F172A !important;
-        font-weight: bold;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    div[data-testid="metric-container"], .premium-card {
-        background-color: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
-        padding: 20px !important;
-        border-radius: 12px !important;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03) !important;
-    }
-    div[data-testid="stMarkdownContainer"] p, h1, h2, h3, h4, h5, h6, label {
-        color: #1E293B !important;
-    }
-    .bot-active { color: #10B981 !important; font-weight: bold; }
-    .bot-headline { color: #0284C7 !important; font-weight: 800; }
-    </style>
-""", unsafe_allow_html=True)
-
-
-def hamta_hemlighet(namn: str) -> str:
-    """Läser först miljövariabel, sedan st.secrets (Streamlit Cloud)."""
-    varde = os.environ.get(namn)
-    if varde:
-        return varde
-    try:
-        return st.secrets.get(namn, "")
-    except Exception:
-        return ""
-
-
-supabase_url = hamta_hemlighet("SUPABASE_URL")
-supabase_key = hamta_hemlighet("SUPABASE_ANON_KEY")
-api_key = hamta_hemlighet("OPENAI_API_KEY")
-
-for nyckel, standard in [("user_authenticated", False), ("user_email", None), ("user_id", None)]:
-    if nyckel not in st.session_state:
-        st.session_state[nyckel] = standard
-
-# =========================================================
-# 🎛️ SIDOMENY: TRADER PORTAL (KONTO & INLOGGNING)
-# =========================================================
-with st.sidebar:
-    st.markdown("# 🤖")
-    st.markdown("## **NQ Trading Bot v1.0**")
-    st.markdown(
-        "<p style='color: #38BDF8; font-weight: bold;'>Trend & Pullback Automation</p>",
-        unsafe_allow_html=True,
-    )
-    st.divider()
-
-    if not st.session_state["user_authenticated"]:
-        st.subheader("🔐 Trader-autentisering")
-        konto_val = st.radio("Välj funktion", ["Logga in", "Skapa konto"])
-
-        email_input = st.text_input("E-postadress", placeholder="trader@firma.se")
-        password_input = st.text_input("Lösenord", type="password", placeholder="******")
-
-        if konto_val == "Logga in":
-            if st.button("Öppna kontrollpanel", type="primary", use_container_width=True):
-                if email_input and password_input and supabase_url and supabase_key:
-                    try:
-                        sb = initiera_supabase(supabase_url, supabase_key)
-                        res = logga_in_anvandare(sb, email_input, password_input)
-                        if res["status"] == "Success":
-                            st.session_state["user_authenticated"] = True
-                            st.session_state["user_email"] = email_input
-                            st.session_state["user_id"] = res["user_id"]
-                            st.success("Ansluten till algoterminalen!")
-                            st.rerun()
-                        else:
-                            st.error(res["meddelande"])
-                    except Exception as e:
-                        st.error(f"Kopplingsfel: {str(e)}")
-                else:
-                    st.warning("Fyll i e-post och lösenord, och kontrollera Supabase-nycklarna.")
-        else:
-            if st.button("Registrera ny bot-licens", type="primary", use_container_width=True):
-                if email_input and password_input and supabase_url and supabase_key:
-                    try:
-                        sb = initiera_supabase(supabase_url, supabase_key)
-                        res = registrera_anvandare(sb, email_input, password_input)
-                        if res["status"] == "Success":
-                            st.success("Konto registrerat! Logga in ovan.")
-                        else:
-                            st.error(res["meddelande"])
-                    except Exception as e:
-                        st.error(f"Registreringsfel: {str(e)}")
-                else:
-                    st.warning("Fyll i e-post och lösenord, och kontrollera Supabase-nycklarna.")
-    else:
-        st.markdown(f"🟢 **Operatör:**\n`{st.session_state['user_email']}`")
-        st.markdown("<p class='bot-active'>⚡ Terminal Status: ONLINE</p>", unsafe_allow_html=True)
-        if st.button("🔒 Koppla ifrån terminal", use_container_width=True):
-            st.session_state["user_authenticated"] = False
-            st.session_state["user_email"] = None
-            st.session_state["user_id"] = None
-            st.rerun()
-
-    st.divider()
-    st.caption("© 2026 Algorithmic Systems AB")
-
-# =========================================================
-# 🏠 HUVUDSIDA: HANDBOK VS TERMINAL
-# =========================================================
-flik_manual, flik_terminal, flik_protokoll = st.tabs(
-    ["📚 Byggmanual & Arkitektur", "🤖 Live Trading Terminal", "📋 Bilaga B & D (Checklistor)"]
-)
-
-# --- FLIK 1: MANUAL ---
-with flik_manual:
-    st.markdown("<h1 class='bot-headline'>NQ Trading Bot — Från noll till färdig</h1>", unsafe_allow_html=True)
-    st.markdown("### *Automatiserad Trend & Pullback-strategi för NQ/MNQ Futures.*")
-    st.write("Denna manual guidar dig steg-för-steg genom skapandet av en regelbaserad tradingrobot för NinjaTrader 8.")
-    st.divider()
-
-    col_spec1, col_spec2, col_spec3 = st.columns(3)
-    with col_spec1:
-        st.markdown("### 📊 Marknad & Hårdvara")
-        st.info("**Instrument:** NQ / MNQ Futures\n\n**Timeframe:** 5 minuter\n\n**Plattform:** NinjaTrader 8 (NinjaScript)")
-    with col_spec2:
-        st.markdown("### ⚙️ Indikatorer & Filter")
-        st.success("**Trend:** EMA 20 > EMA 50\n\n**Filter:** Pris jämfört med VWAP\n\n**Sizing:** ATR-baserad stop & target")
-    with col_spec3:
-        st.markdown("### 🔒 Live Riskskydd")
-        st.warning("**Daily Lock:** Spärr vid maxförlust\n\n**Positioner:** Max 1 aktiv position\n\n**Order:** OnBarClose-verifiering")
-
-    st.divider()
-    st.subheader("🧮 Kontraktsöversikt")
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        st.markdown("<div class='premium-card' style='border-top: 4px solid #0284C7;'><h4>E-mini Nasdaq-100 (NQ)</h4><h2>$20 / punkt</h2><p><b>Minsta tick:</b> 0.25 punkter ($5)</p></div>", unsafe_allow_html=True)
-    with m_col2:
-        st.markdown("<div class='premium-card' style='border-top: 4px solid #10B981;'><h4>Micro E-mini Nasdaq-100 (MNQ)</h4><h2>$2 / punkt</h2><p><b>Minsta tick:</b> 0.25 punkter ($0.50)</p></div>", unsafe_allow_html=True)
-
-# --- FLIK 2: HANDELSTERMINAL ---
-with flik_terminal:
-    if not st.session_state["user_authenticated"]:
-        st.markdown("### 🔒 Algoritmisk Panel Låst")
-        st.warning("Vänligen logga in eller skapa konto i sidomenyn till vänster för att öppna live-terminalen.")
-    else:
-        st.markdown("### 🤖 Robotinställningar & Live-analys")
-
-        aktiv_api_key = api_key
-        if not aktiv_api_key:
-            aktiv_api_key = st.text_input(
-                "OpenAI API-nyckel för nyhetsanalys", type="password", key="bot_openai_key"
-            )
-
-        uploaded_log = st.file_uploader(
-            "Ladda upp NinjaTrader Logg- eller Backtestfil (CSV/XLSX/PDF)",
-            type=["csv", "xlsx", "pdf"],
-        )
-
-        if uploaded_log is not None and st.button("🧠 Låt AI Analysera Marknadssentiment", type="primary"):
-            if aktiv_api_key:
-                try:
-                    report = parse_financial_file(uploaded_log.name, uploaded_log.getvalue())
-                    with st.spinner("AI utvärderar strategins historiska edge..."):
-                        analysis = analyze_report(report, aktiv_api_key)
-                        st.session_state["bot_analysis"] = analysis
-                except Exception as e:
-                    st.error(str(e))
-            else:
-                st.warning("API-nyckel saknas.")
-
-        if "bot_analysis" in st.session_state:
-            st.divider()
-            st.subheader("📋 AI Strategi- & Riskrapport")
-            st.markdown(st.session_state["bot_analysis"])
-
-        st.divider()
-        st.subheader("📊 Robotens Exekveringshistorik (Från Supabase)")
-
-        db_data = pd.DataFrame()
-        if supabase_url and supabase_key:
-            try:
-                sb_client = initiera_supabase(supabase_url, supabase_key)
-                db_data = hamta_historik_fran_supabase(sb_client, st.session_state["user_id"])
-            except Exception as e:
-                st.error(f"Kunde inte hämta robotdata: {str(e)}")
-
-        if not db_data.empty:
-            senaste_trade = db_data.iloc[-1]
-            kpi_t1, kpi_t2, kpi_t3 = st.columns(3)
-            with kpi_t1:
-                st.metric("Senaste Trade-Resultat", f"{senaste_trade['profit']:,.2f} USD")
-            with kpi_t2:
-                st.metric("Total Vinst/Förlust", f"{db_data['profit'].sum():,.2f} USD")
-            with kpi_t3:
-                st.metric("Antal Trades", f"{len(db_data)}")
-
-            st.markdown("#### Ackumulerad avkastning")
-            st.line_chart(db_data["profit"].cumsum())
-
-            st.markdown("#### Alla trades")
-            st.dataframe(db_data, use_container_width=True)
-        else:
-            st.info("Ingen exekveringshistorik hittades ännu.")
-
-# --- FLIK 3: CHECKLISTOR ---
-with flik_protokoll:
-    st.markdown("### 📋 Bilaga B & D (Checklistor)")
-    st.info("Platshållare: skicka innehållet i Bilaga B och D så fyller jag i checklistorna.")
+}
