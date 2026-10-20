@@ -209,18 +209,18 @@ with flik_verktyg:
                 st.warning("Fyll i bolagsnamn.")
             elif rev_input <= 0:
                 st.warning("Omsättningen måste vara större än 0.")
-            else:
-                if supabase_url and supabase_key:
-                    with st.spinner("Skickar datapaket..."):
-                        try:
-                            sb_klient = initiera_supabase(supabase_url, supabase_key)
-                            resultat = bearbeta_och_spara_finansdata(
-                                sb_klient, b_namn, val_aar, val_kvartal, rev_input, prof_input, st.session_state["user_id"]
-                            )
-                            if resultat["status"] == "Success":
-                                st.success(resultat["meddelande"])
-                                st.balloons()
-                                st.rerun()
-                            else:
-                                st.error(resultat["meddelande"])
-                        except Exception as e:
+            elif supabase_url and supabase_key:
+                with st.spinner("Skickar datapaket..."):
+                    try:
+                        sb_klient = initiera_supabase(supabase_url, supabase_key)
+                        resultat = bearbeta_och_spara_finansdata(
+                            sb_klient, b_namn, val_aar, val_kvartal, rev_input, prof_input, st.session_state["user_id"]
+                        )
+                        if resultat["status"] == "Success":
+                            st.success(resultat["meddelande"])
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error(resultat["meddelande"])
+                    except Exception as db_err:
+                        st.error(f"Kopplingsfel: {str(db_err)}")
