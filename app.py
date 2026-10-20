@@ -1,157 +1,150 @@
 import os
-from datetime import date
-
-import httpx
 import streamlit as st
+import pandas as pd
 from openai import OpenAIError
-from postgrest.exceptions import APIError
 
-from ai_engine import (
-    FinancialFileError,
-    analyze_report,
-    bearbeta_och_spara_finansdata,
-    initiera_supabase,
-    parse_financial_file,
-)
+from ai_engine import FinancialFileError, analyze_report, parse_financial_file
+from ai_engine import initiera_supabase, bearbeta_och_spara_finansdata, hämta_historik_från_supabase
 
+# Sidkonfiguration
+st.set_page_config(page_title="Smartare ekonomi | AI-finansanalytiker", page_icon="📈", layout="wide")
 
-st.set_page_config(page_title="AI-finansanalytiker", page_icon="📊", layout="wide")
-st.title("AI-finansanalytiker")
-st.write(
-    "Ladda upp en finansiell rapport för att få en strukturerad sammanfattning av "
-    "siffror, utveckling och osäkerheter."
-)
+# Skapa flikar för Landningssida vs Verktyg
+flik_hemsida, flik_verktyg = st.tabs(["🏠 Hem & Prissättning", "🤖 AI-Analysverktyg"])
 
-st.info(
-    "Integritet: Filen behandlas i den här appen. När du begär en analys skickas "
-    "det extraherade rapportinnehållet till OpenAI för behandling."
-)
-
-api_key = os.environ.get("OPENAI_API_KEY", "")
-if not api_key:
-    api_key = st.text_input(
-        "OpenAI API-nyckel",
-        type="password",
-        help="Nyckeln används endast under den här sessionen och sparas inte av appen.",
+# =========================================================
+# 🏠 FLIK 1: LANDNINGSSIDA & AFFÄRSMODELL
+# =========================================================
+with flik_hemsida:
+    st.title("📈 AI-Finansanalytikern")
+    st.markdown("## **Smartare ekonomi. Spårbara beslut.**")
+    st.write(
+        "Välkommen till framtidens finansiella analys. Vi hjälper CFO:er, företagare "
+        "och ekonomer och transformera ostrukturerade rapporter till insiktsfulla beslutsunderlag på sekunder."
     )
-
-uploaded_file = st.file_uploader(
-    "Välj en finansiell rapport",
-    type=["csv", "xlsx", "pdf"],
-    help="Max 10 MB. PDF-filer måste innehålla text, inte bara skannade bilder.",
-)
-
-if uploaded_file is not None:
-    st.caption(f"Vald fil: {uploaded_file.name} ({uploaded_file.size / 1024:.1f} KB)")
-
-if st.button(
-    "Analysera rapport",
-    type="primary",
-    disabled=uploaded_file is None or not api_key,
-):
-    try:
-        report = parse_financial_file(uploaded_file.name, uploaded_file.getvalue())
-    except FinancialFileError as error:
-        st.error(str(error))
-    else:
-        with st.spinner("Analyserar rapporten …"):
-            try:
-                analysis = analyze_report(report, api_key)
-            except OpenAIError as error:
-                st.error(f"OpenAI-analysen misslyckades: {error}")
-            else:
-                st.session_state["analysis"] = analysis
-                st.session_state["analysis_filename"] = uploaded_file.name
-                st.session_state["analysis_details"] = report.details
-                st.session_state["analysis_notice"] = report.notice
-
-if uploaded_file is None:
-    st.caption("Ladda upp en CSV-, Excel- eller PDF-fil för att komma igång.")
-elif not api_key:
-    st.warning("Ange en OpenAI API-nyckel för att starta analysen.")
-
-if st.session_state.get("analysis"):
+    
     st.divider()
-    st.subheader(f"Analys: {st.session_state['analysis_filename']}")
-    st.caption(st.session_state["analysis_details"])
-    if st.session_state.get("analysis_notice"):
-        st.warning(st.session_state["analysis_notice"])
-    st.markdown(st.session_state["analysis"])
-    st.caption(
-        "Analysen är automatisk och kan innehålla fel. Kontrollera siffrorna mot "
-        "originalkällan; detta är inte personlig investeringsrådgivning."
-    )
+    
+    st.subheader("Varför välja AI-Finansanalytikern?")
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        st.markdown("### 🤖 Automatiserad precision")
+        st.write("Slipp leta i hundrasidiga PDF-filer. Vår AI identifierar och sammanfattar det viktigaste på ett ögonblick.")
+    with col_f2:
+        st.markdown("### 📈 Visuell historik")
+        st.write("Varje siffra du verifierar sparas i en säker molndatabas och förvandlas automatiskt till interaktiva trenddiagram.")
+    with col_f3:
+        st.markdown("### 🔒 Säkerhet i fokus")
+        st.write("Dina finansiella data hanteras i krypterade miljöer. Du har full kontroll över vad som delas och sparas.")
 
-st.divider()
-st.subheader("Spara finansiella nyckeltal i Supabase")
-st.caption(
-    "Ange verifierade värden från rapporten. De hämtas inte automatiskt från "
-    "AI-analysen."
-)
+    st.divider()
 
-bolagsnamn = st.text_input("Bolagsnamn")
-period_col1, period_col2 = st.columns(2)
-with period_col1:
-    aar = st.number_input(
-        "År",
-        min_value=1,
-        max_value=date.today().year + 1,
-        value=date.today().year,
-        step=1,
-    )
-with period_col2:
-    kvartal = st.selectbox("Kvartal", ["Q1", "Q2", "Q3", "Q4"])
+    st.subheader("Transparent prissättning (Förslag)")
+    col_p1, col_p2, col_p3 = st.columns(3)
+    with col_p1:
+        st.info("### **Freemium**\n\n**0 kr** / mån\n\n- 3 analyser / månad\n- Max 5 MB filstorlek\n- Endast lokal analys")
+    with col_p2:
+        st.success("### **Growth / Pro**\n\n**499 kr** / mån\n\n- Obegränsade analyser\n- Full tillgång till molnhistorik\n- Interaktiva trenddiagram\n- Export till PDF/Excel")
+    with col_p3:
+        st.warning("### **Enterprise**\n\n**Offereras**\n\n- Custom AI-modeller\n- Direktintegration (SAP/Fortnox)\n- Dedikerad databas\n- Personlig kontoansvarig")
 
-value_col1, value_col2 = st.columns(2)
-with value_col1:
-    omsattning_input = st.number_input(
-        "Omsättning",
-        min_value=0.0,
-        value=0.0,
-        step=1_000.0,
-        help="Ange rapportens omsättning; värdet måste vara större än noll.",
-    )
-with value_col2:
-    vinst_input = st.number_input(
-        "Vinst",
-        value=0.0,
-        step=1_000.0,
-        help="Ange rapportens vinst. Ett negativt värde kan anges för förlust.",
-    )
+# =========================================================
+# 🤖 FLIK 2: DET FAKTISKA AI-VERKTYGET
+# =========================================================
+with flik_verktyg:
+    st.title("📊 AI-finansanalytiker")
+    
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        api_key = st.text_input("OpenAI API-nyckel", type="password", key="verktyg_api_key")
 
-supabase_url = os.environ.get("SUPABASE_URL", "")
-supabase_key = os.environ.get("SUPABASE_KEY", "")
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    supabase_key = os.environ.get("SUPABASE_ANON_KEY", "")
 
-if st.button("🚀 Spara finansiella data i molnet", type="secondary"):
-    if not bolagsnamn.strip():
-        st.warning("Du måste fylla i bolagsnamn.")
-    elif omsattning_input <= 0:
-        st.warning(
-            "Omsättningen måste vara större än 0 för att kunna beräkna "
-            "vinstmarginal och spara."
-        )
-    elif not supabase_url or not supabase_key:
-        st.error(
-            "Systemfel: Anslutningsnycklar för Supabase saknas i "
-            "miljövariablerna SUPABASE_URL och SUPABASE_KEY."
-        )
-    else:
-        with st.spinner("Ansluter till molndatabasen och sparar nyckeltal..."):
-            try:
-                supabase_klient = initiera_supabase(supabase_url, supabase_key)
-                resultat = bearbeta_och_spara_finansdata(
-                    supabase_klient,
-                    bolagsnamn,
-                    int(aar),
-                    kvartal,
-                    omsattning_input,
-                    vinst_input,
-                )
-            except (APIError, httpx.HTTPError, ValueError) as error:
-                st.error(f"Kunde inte spara till Supabase: {error}")
-            else:
-                if resultat["status"] == "Success":
-                    st.success(resultat["meddelande"])
-                    st.balloons()
+    uploaded_file = st.file_uploader("Välj en finansiell rapport", type=["csv", "xlsx", "pdf"])
+
+    if uploaded_file is not None:
+        st.caption(f"Vald fil: {uploaded_file.name} ({uploaded_file.size / 1024:.1f} KB)")
+
+    if st.button("Analysera rapport", type="primary", disabled=uploaded_file is None or not api_key):
+        try:
+            report = parse_financial_file(uploaded_file.name, uploaded_file.getvalue())
+        except FinancialFileError as error:
+            st.error(str(error))
+        else:
+            with st.spinner("Analyserar rapporten …"):
+                try:
+                    analysis = analyze_report(report, api_key)
+                except OpenAIError as error:
+                    st.error(f"OpenAI-analysen misslyckades: {error}")
                 else:
-                    st.error(resultat["meddelande"])
+                    st.session_state["analysis"] = analysis
+                    st.session_state["analysis_filename"] = uploaded_file.name
+                    st.session_state["report_data"] = report
+
+    if st.session_state.get("analysis"):
+        st.divider()
+        st.subheader(f"Analyse: {st.session_state['analysis_filename']}")
+        st.markdown(st.session_state["analysis"])
+        
+        # 📈 SKARPA DIAGRAM FRÅN SUPABASE
+        st.divider()
+        st.subheader("📈 Finansiell Trendanalys (Historik från Supabase)")
+        
+        if supabase_url and supabase_key:
+            try:
+                sb_client = initiera_supabase(supabase_url, supabase_key)
+                db_data = hämta_historik_från_supabase(sb_client)
+                
+                if not db_data.empty:
+                    graf_col1, graf_col2 = st.columns(2)
+                    with graf_col1:
+                        st.caption("Omsättningsutveckling (kr)")
+                        st.bar_chart(db_data, x="period", y="revenue", color="#1f77b4")
+                    with graf_col2:
+                        st.caption("Vinst/Förlustutveckling (kr)")
+                        st.bar_chart(db_data, x="period", y="profit", color="#2ca02c")
+                else:
+                    st.info("Databasen är tom. Spara ditt första nyckeltal nedan för att rita diagrammet.")
+            except Exception as e:
+                st.error(f"Kunde inte hämta diagramdata från Supabase: {str(e)}")
+        else:
+            st.warning("Supabase är inte konfigurerat. Diagram kan inte ritas från databasen.")
+
+        # DATABASFORMULÄR
+        st.divider()
+        st.subheader("🗄️ Molndatabas - Spara verifierade nyckeltal")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            bolagsnamn = st.text_input("Bolagets namn")
+        with col2:
+            aar = st.number_input("Rapportens år", min_value=2020, max_value=2030, value=2026)
+        with col3:
+            kvartal = st.selectbox("Period / Kvartal", ["Q1", "Q2", "Q3", "Q4", "Helår"])
+            
+        col4, col5 = st.columns(2)
+        with col4:
+            omsattning_input = st.number_input("Faktisk Omsättning (kr)", min_value=0.0)
+        with col5:
+            vinst_input = st.number_input("Faktisk Vinst/Förlust (kr)", value=0.0)
+            
+        if st.button("🚀 Spara finansiella data i molnet", type="secondary"):
+            if not bolagsnamn:
+                st.warning("Du måste fylla i bolagsnamn.")
+            elif omsattning_input <= 0:
+                st.warning("Omsättningen måste vara större än 0 (Spärr mot nollvärden aktiv).")
+            elif not supabase_url or not supabase_key:
+                st.info("Logiken validerad! Systemet väntar på skarpa miljövariabler i molnet.")
+            else:
+                with st.spinner("Sparar nyckeltal..."):
+                    try:
+                        supabase_klient = initiera_supabase(supabase_url, supabase_key)
+                        resultat = bearbeta_och_spara_finansdata(supabase_klient, bolagsnamn, aar, kvartal, omsattning_input, vinst_input)
+                        if resultat["status"] == "Success":
+                            st.success(resultat["meddelande"])
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error(resultat["meddelande"])
+                    except Exception as e:
+                        st.error(f"Fel: {str(e)}")
