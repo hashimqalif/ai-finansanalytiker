@@ -4,7 +4,7 @@ import pandas as pd
 from openai import OpenAIError
 
 from ai_engine import FinancialFileError, analyze_report, parse_financial_file
-from ai_engine import initiera_supabase, bearbeta_och_spara_finansdata, hämta_historik_från_supabase
+from ai_engine import initiera_supabase, bearbeta_och_spara_finansdata, hamta_historik_fran_supabase
 
 # Sidkonfiguration
 st.set_page_config(page_title="Smartare ekonomi | AI-finansanalytiker", page_icon="📈", layout="wide")
@@ -20,7 +20,7 @@ with flik_hemsida:
     st.markdown("## **Smartare ekonomi. Spårbara beslut.**")
     st.write(
         "Välkommen till framtidens finansiella analys. Vi hjälper CFO:er, företagare "
-        "och ekonomer och transformera ostrukturerade rapporter till insiktsfulla beslutsunderlag på sekunder."
+        "och ekonomer att transformera ostrukturerade rapporter till insiktsfulla beslutsunderlag på sekunder."
     )
     
     st.divider()
@@ -94,7 +94,7 @@ with flik_verktyg:
         if supabase_url and supabase_key:
             try:
                 sb_client = initiera_supabase(supabase_url, supabase_key)
-                db_data = hämta_historik_från_supabase(sb_client)
+                db_data = hamta_historik_fran_supabase(sb_client)
                 
                 if not db_data.empty:
                     graf_col1, graf_col2 = st.columns(2)
