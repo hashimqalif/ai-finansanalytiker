@@ -47,7 +47,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_code=True)
 
-# Initiera anslutningar säkert
+# Initiera anslutningar säkert från miljövariabler
 supabase_url = os.environ.get("SUPABASE_URL", "")
 supabase_key = os.environ.get("SUPABASE_ANON_KEY", "")
 api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -150,7 +150,7 @@ with flik_hemsida:
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
         st.markdown("### ⚡ Blixtsnabb Extraktion")
-        st.info("Sluta leta manuellt. Vår AI-motor läser igenom kvartalsrapporter på två sekunder och lyfter ut kärndatan.")
+        st.info("Sluta leta manuellt. Vår AI-motor läsem igenom kvartalsrapporter på två sekunder och lyfter ut kärndatan.")
     with f_col2:
         st.markdown("### 🔒 Isolerade Kundkonton")
         st.success("Varje registrerat företag äger sin egen krypterade databasrad. Din finansiella data kan aldrig läcka till obehöriga.")
@@ -203,7 +203,6 @@ with flik_verktyg:
         st.divider()
         st.subheader("📊 Dina Sparade Företagsdata")
         
+        db_data = pd.DataFrame()
         if supabase_url and supabase_key:
-            db_data = pd.DataFrame()
             try:
-                sb_client = initiera_supabase(supabase_url, supabase_key)
