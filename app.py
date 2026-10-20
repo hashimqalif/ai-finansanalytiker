@@ -1,250 +1,153 @@
-import os
 import streamlit as st
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
 
-from ai_engine import FinancialFileError, analyze_report, parse_financial_file
-from ai_engine import (
-    initiera_supabase,
-    bearbeta_och_spara_finansdata,
-    hamta_historik_fran_supabase,
-    registrera_anvandare,
-    logga_in_anvandare,
-)
+# 🏢 PREMIUM LIGHT FINTECH CONFIGURATION (ÖPPEN TERMINAL)
+st.set_page_config(page_title="NQ Trading Bot Terminal", page_icon="🤖", layout="wide")
 
-# 🏢 PREMIUM LIGHT FINTECH THEMING (HÖG KONTRAST & DESIGN)
-st.set_page_config(page_title="NQ Trading Bot Portal", page_icon="🤖", layout="wide")
-
-# Custom CSS för ljust, krispigt och supertydligt fintech-tema
+# Custom CSS för krispigt, ljust premium-tema med hög kontrast
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
         background-color: #F8FAFC !important;
         color: #1E293B !important;
     }
-    [data-testid="stSidebar"] {
-        background-color: #0F172A !important;
-        color: #FFFFFF !important;
+    [data-testid="stSidebar"] { 
+        background-color: #0F172A !important; 
+        color: #FFFFFF !important; 
     }
-    [data-testid="stSidebar"] p, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
-    [data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
-        color: #FFFFFF !important;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 12px;
-        background-color: #E2E8F0;
-        padding: 6px;
-        border-radius: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        border-radius: 6px;
-        color: #475569;
-        padding: 8px 16px;
-        font-weight: 500;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF !important;
-        color: #0F172A !important;
-        font-weight: bold;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] span, [data-testid="stSidebar"] label { 
+        color: #FFFFFF !important; 
     }
     div[data-testid="metric-container"], .premium-card {
         background-color: #FFFFFF !important;
         border: 1px solid #E2E8F0 !important;
         padding: 20px !important;
         border-radius: 12px !important;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03) !important;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05) !important;
     }
-    div[data-testid="stMarkdownContainer"] p, h1, h2, h3, h4, h5, h6, label {
-        color: #1E293B !important;
+    div[data-testid="stMarkdownContainer"] p, h1, h2, h3, h4, h5, h6, label { 
+        color: #1E293B !important; 
     }
-    .bot-active { color: #10B981 !important; font-weight: bold; }
-    .bot-headline { color: #0284C7 !important; font-weight: 800; }
+    .signal-box { padding: 15px; border-radius: 8px; font-weight: bold; text-align: center; margin-bottom: 20px; }
+    .long-sig { background-color: #DCFCE7; color: #15803D; border: 2px solid #22C55E; }
+    .short-sig { background-color: #FEE2E2; color: #B91C1C; border: 2px solid #EF4444; }
+    .neutral-sig { background-color: #F1F5F9; color: #475569; border: 2px solid #94A3B8; }
     </style>
 """, unsafe_allow_html=True)
 
+# =========================================================
+# 🎛️ REALTIME SIMULATOR ENGINE (Marknadsdata)
+# =========================================================
+if "market_data" not in st.session_state:
+    # Generera 60 startpunkter för NQ-indexet runt 20 000 punkter
+    np.random.seed(42)
+    base_price = 20000.0
+    times = pd.date_range(end=pd.Timestamp.now(), periods=60, freq='5min')
+    data = []
+    
+    for t in times:
+        move = np.random.normal(0, 15)
+        base_price += move
+        open_p = base_price - np.random.uniform(-10, 10)
+        close_p = base_price + np.random.uniform(-10, 10)
+        high_p = max(open_p, close_p) + np.random.uniform(0, 15)
+        low_p = min(open_p, close_p) - np.random.uniform(0, 15)
+        data.append([t, open_p, high_p, low_p, close_p])
+        
+    st.session_state["market_data"] = pd.DataFrame(data, columns=["Time", "Open", "High", "Low", "Close"])
 
-def hamta_hemlighet(namn: str) -> str:
-    """Läser först miljövariabel, sedan st.secrets (Streamlit Cloud)."""
-    varde = os.environ.get(namn)
-    if varde:
-        return varde
-    try:
-        return st.secrets.get(namn, "")
-    except Exception:
-        return ""
+# Beräkna indikatorer live utifrån din handbok
+df = st.session_state["market_data"].copy()
+df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+df["VWAP"] = df["Close"].expanding().mean() + 2
+df["TR"] = np.maximum(df["High"] - df["Low"], np.maximum(abs(df["High"] - df["Close"].shift(1)), abs(df["Low"] - df["Close"].shift(1))))
+df["ATR"] = df["TR"].rolling(window=14).mean().fillna(20.0)
 
-
-supabase_url = hamta_hemlighet("SUPABASE_URL")
-supabase_key = hamta_hemlighet("SUPABASE_ANON_KEY")
-api_key = hamta_hemlighet("OPENAI_API_KEY")
-
-for nyckel, standard in [("user_authenticated", False), ("user_email", None), ("user_id", None)]:
-    if nyckel not in st.session_state:
-        st.session_state[nyckel] = standard
+latest = df.iloc[-1]
+is_long_trend = latest["EMA20"] > latest["EMA50"]
+is_short_trend = latest["EMA20"] < latest["EMA50"]
+is_long_bias = latest["Close"] > latest["VWAP"]
+is_short_bias = latest["Close"] < latest["VWAP"]
+is_long_pullback = latest["Low"] <= latest["EMA20"] and latest["Close"] > latest["EMA20"]
+is_short_pullback = latest["High"] >= latest["EMA20"] and latest["Close"] < latest["EMA20"]
 
 # =========================================================
-# 🎛️ SIDOMENY: TRADER PORTAL (KONTO & INLOGGNING)
+# 🎛️ SIDOMENY (KONTROLLER)
 # =========================================================
 with st.sidebar:
     st.markdown("# 🤖")
-    st.markdown("## **NQ Trading Bot v1.0**")
-    st.markdown(
-        "<p style='color: #38BDF8; font-weight: bold;'>Trend & Pullback Automation</p>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("## **NQ Live Terminal**")
+    st.markdown("<p style='color: #38BDF8; font-weight: bold;'>Status: LIVE & OPERATIV</p>", unsafe_allow_html=True)
     st.divider()
+    
+    st.markdown("### 🎛️ Marknadssimulering")
+    if st.button("🔄 Generera Ny Bar (Tick)", type="primary", use_container_width=True):
+        new_time = df["Time"].iloc[-1] + pd.Timedelta(minutes=5)
+        last_close = df["Close"].iloc[-1]
+        move = np.random.normal(0, 15)
+        new_close = last_close + move
+        new_open = last_close
+        new_high = max(new_open, new_close) + np.random.uniform(0, 12)
+        new_low = min(new_open, new_close) - np.random.uniform(0, 12)
+        
+        new_row = pd.DataFrame([[new_time, new_open, new_high, new_low, new_close]], columns=["Time", "Open", "High", "Low", "Close"])
+        st.session_state["market_data"] = pd.concat([st.session_state["market_data"], new_row]).iloc[1:].reset_index(drop=True)
+        st.rerun()
 
-    if not st.session_state["user_authenticated"]:
-        st.subheader("🔐 Trader-autentisering")
-        konto_val = st.radio("Välj funktion", ["Logga in", "Skapa konto"])
-
-        email_input = st.text_input("E-postadress", placeholder="trader@firma.se")
-        password_input = st.text_input("Lösenord", type="password", placeholder="******")
-
-        if konto_val == "Logga in":
-            if st.button("Öppna kontrollpanel", type="primary", use_container_width=True):
-                if email_input and password_input and supabase_url and supabase_key:
-                    try:
-                        sb = initiera_supabase(supabase_url, supabase_key)
-                        res = logga_in_anvandare(sb, email_input, password_input)
-                        if res["status"] == "Success":
-                            st.session_state["user_authenticated"] = True
-                            st.session_state["user_email"] = email_input
-                            st.session_state["user_id"] = res["user_id"]
-                            st.success("Ansluten till algoterminalen!")
-                            st.rerun()
-                        else:
-                            st.error(res["meddelande"])
-                    except Exception as e:
-                        st.error(f"Kopplingsfel: {str(e)}")
-                else:
-                    st.warning("Fyll i e-post och lösenord, och kontrollera Supabase-nycklarna.")
-        else:
-            if st.button("Registrera ny bot-licens", type="primary", use_container_width=True):
-                if email_input and password_input and supabase_url and supabase_key:
-                    try:
-                        sb = initiera_supabase(supabase_url, supabase_key)
-                        res = registrera_anvandare(sb, email_input, password_input)
-                        if res["status"] == "Success":
-                            st.success("Konto registrerat! Logga in ovan.")
-                        else:
-                            st.error(res["meddelande"])
-                    except Exception as e:
-                        st.error(f"Registreringsfel: {str(e)}")
-                else:
-                    st.warning("Fyll i e-post och lösenord, och kontrollera Supabase-nycklarna.")
-    else:
-        st.markdown(f"🟢 **Operatör:**\n`{st.session_state['user_email']}`")
-        st.markdown("<p class='bot-active'>⚡ Terminal Status: ONLINE</p>", unsafe_allow_html=True)
-        if st.button("🔒 Koppla ifrån terminal", use_container_width=True):
-            st.session_state["user_authenticated"] = False
-            st.session_state["user_email"] = None
-            st.session_state["user_id"] = None
-            st.rerun()
+    if st.button("♻️ Nollställ Diagram", use_container_width=True):
+        del st.session_state["market_data"]
+        st.rerun()
 
     st.divider()
-    st.caption("© 2026 Algorithmic Systems AB")
+    st.caption("Exklusiv privat utgåva v1.0")
 
 # =========================================================
-# 🏠 HUVUDSIDA: HANDBOK VS TERMINAL
+# 🏠 HUVUDSIDA: LIVE-TERMINAL & STRATEGI
 # =========================================================
-flik_manual, flik_terminal, flik_protokoll = st.tabs(
-    ["📚 Byggmanual & Arkitektur", "🤖 Live Trading Terminal", "📋 Bilaga B & D (Checklistor)"]
-)
+st.markdown("<h1 style='color: #0284C7; font-weight: 800;'>🤖 Min Personliga NQ Trading Bot</h1>", unsafe_allow_html=True)
+st.write("Terminalen körs helt lokalt i din session. Inga inloggningar krävs.")
+st.divider()
 
-# --- FLIK 1: MANUAL ---
-with flik_manual:
-    st.markdown("<h1 class='bot-headline'>NQ Trading Bot — Från noll till färdig</h1>", unsafe_allow_html=True)
-    st.markdown("### *Automatiserad Trend & Pullback-strategi för NQ/MNQ Futures.*")
-    st.write("Denna manual guidar dig steg-för-steg genom skapandet av en regelbaserad tradingrobot för NinjaTrader 8.")
-    st.divider()
+# Live-statistik för de exakta reglerna
+col_k1, col_l2, col_k3, col_k4 = st.columns(4)
+with col_k1: st.metric("NQ Live Pris", f"{latest['Close']:.2f} USD")
+with col_l2: st.metric("EMA 20 / 50 Trend", "🟢 BULLISH (Long)" if is_long_trend else "🔴 BEARISH (Short)")
+with col_k3: st.metric("VWAP Bias", "🟢 OVER VWAP" if is_long_bias else "🔴 UNDER VWAP")
+with col_k4: st.metric("ATR Volatilitet", f"{latest['ATR']:.1f}")
 
-    col_spec1, col_spec2, col_spec3 = st.columns(3)
-    with col_spec1:
-        st.markdown("### 📊 Marknad & Hårdvara")
-        st.info("**Instrument:** NQ / MNQ Futures\n\n**Timeframe:** 5 minuter\n\n**Plattform:** NinjaTrader 8 (NinjaScript)")
-    with col_spec2:
-        st.markdown("### ⚙️ Indikatorer & Filter")
-        st.success("**Trend:** EMA 20 > EMA 50\n\n**Filter:** Pris jämfört med VWAP\n\n**Sizing:** ATR-baserad stop & target")
-    with col_spec3:
-        st.markdown("### 🔒 Live Riskskydd")
-        st.warning("**Daily Lock:** Spärr vid maxförlust\n\n**Positioner:** Max 1 aktiv position\n\n**Order:** OnBarClose-verifiering")
+# --- 🚦 AUTOMATISK SIGNALAVKÄNNING ---
+st.write("")
+if is_long_trend and is_long_bias and is_long_pullback:
+    st.markdown("<div class='signal-box long-sig'>🟢 KÖPSIGNAL IDENTIFIERAD: ENTER LONG (EMA Pullback + Confirmation slutförd)</div>", unsafe_allow_html=True)
+elif is_short_trend and is_short_bias and is_short_pullback:
+    st.markdown("<div class='signal-box short-sig'>🔴 SÄLJSIGNAL IDENTIFIERAD: ENTER SHORT (EMA Pullback + Confirmation slutförd)</div>", unsafe_allow_html=True)
+else:
+    st.markdown("<div class='signal-box neutral-sig'>⚪ MARKNADSSCANNER: Söker efter regelbunden Pullback mot EMA 20...</div>", unsafe_allow_html=True)
 
-    st.divider()
-    st.subheader("🧮 Kontraktsöversikt")
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        st.markdown("<div class='premium-card' style='border-top: 4px solid #0284C7;'><h4>E-mini Nasdaq-100 (NQ)</h4><h2>$20 / punkt</h2><p><b>Minsta tick:</b> 0.25 punkter ($5)</p></div>", unsafe_allow_html=True)
-    with m_col2:
-        st.markdown("<div class='premium-card' style='border-top: 4px solid #10B981;'><h4>Micro E-mini Nasdaq-100 (MNQ)</h4><h2>$2 / punkt</h2><p><b>Minsta tick:</b> 0.25 punkter ($0.50)</p></div>", unsafe_allow_html=True)
+# --- 📈 PROFESSIONELLT CANDLESTICK-DIAGRAM ---
+st.subheader("📈 Interaktiv 5-Minutersgraf (NQ Futures)")
+fig = go.Figure()
 
-# --- FLIK 2: HANDELSTERMINAL ---
-with flik_terminal:
-    if not st.session_state["user_authenticated"]:
-        st.markdown("### 🔒 Algoritmisk Panel Låst")
-        st.warning("Vänligen logga in eller skapa konto i sidomenyn till vänster för att öppna live-terminalen.")
-    else:
-        st.markdown("### 🤖 Robotinställningar & Live-analys")
+# Lägg till Candlesticks
+fig.add_trace(go.Candlestick(x=df['Time'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='NQ Pris'))
+# Lägg till dina indikatorer
+fig.add_trace(go.Scatter(x=df['Time'], y=df['EMA20'], line=dict(color='#22C55E', width=1.5), name='EMA 20 (Fast Pullback)'))
+fig.add_trace(go.Scatter(x=df['Time'], y=df['EMA50'], line=dict(color='#1E3A8A', width=1.5), name='EMA 50 (Slow Trend)'))
+fig.add_trace(go.Scatter(x=df['Time'], y=df['VWAP'], line=dict(color='#38BDF8', width=2, dash='dash'), name='Sessions-VWAP'))
 
-        aktiv_api_key = api_key
-        if not aktiv_api_key:
-            aktiv_api_key = st.text_input(
-                "OpenAI API-nyckel för nyhetsanalys", type="password", key="bot_openai_key"
-            )
+fig.update_layout(template="plotly_white", xaxis_rangeslider_visible=False, height=550, margin=dict(l=10, r=10, t=10, b=10))
+st.plotly_chart(fig, use_container_width=True)
 
-        uploaded_log = st.file_uploader(
-            "Ladda upp NinjaTrader Logg- eller Backtestfil (CSV/XLSX/PDF)",
-            type=["csv", "xlsx", "pdf"],
-        )
-
-        if uploaded_log is not None and st.button("🧠 Låt AI Analysera Marknadssentiment", type="primary"):
-            if aktiv_api_key:
-                try:
-                    report = parse_financial_file(uploaded_log.name, uploaded_log.getvalue())
-                    with st.spinner("AI utvärderar strategins historiska edge..."):
-                        analysis = analyze_report(report, aktiv_api_key)
-                        st.session_state["bot_analysis"] = analysis
-                except Exception as e:
-                    st.error(str(e))
-            else:
-                st.warning("API-nyckel saknas.")
-
-        if "bot_analysis" in st.session_state:
-            st.divider()
-            st.subheader("📋 AI Strategi- & Riskrapport")
-            st.markdown(st.session_state["bot_analysis"])
-
-        st.divider()
-        st.subheader("📊 Robotens Exekveringshistorik (Från Supabase)")
-
-        db_data = pd.DataFrame()
-        if supabase_url and supabase_key:
-            try:
-                sb_client = initiera_supabase(supabase_url, supabase_key)
-                db_data = hamta_historik_fran_supabase(sb_client, st.session_state["user_id"])
-            except Exception as e:
-                st.error(f"Kunde inte hämta robotdata: {str(e)}")
-
-        if not db_data.empty:
-            senaste_trade = db_data.iloc[-1]
-            kpi_t1, kpi_t2, kpi_t3 = st.columns(3)
-            with kpi_t1:
-                st.metric("Senaste Trade-Resultat", f"{senaste_trade['profit']:,.2f} USD")
-            with kpi_t2:
-                st.metric("Total Vinst/Förlust", f"{db_data['profit'].sum():,.2f} USD")
-            with kpi_t3:
-                st.metric("Antal Trades", f"{len(db_data)}")
-
-            st.markdown("#### Ackumulerad avkastning")
-            st.line_chart(db_data["profit"].cumsum())
-
-            st.markdown("#### Alla trades")
-            st.dataframe(db_data, use_container_width=True)
-        else:
-            st.info("Ingen exekveringshistorik hittades ännu.")
-
-# --- FLIK 3: CHECKLISTOR ---
-with flik_protokoll:
-    st.markdown("### 📋 Bilaga B & D (Checklistor)")
-    st.info("Platshållare: skicka innehållet i Bilaga B och D så fyller jag i checklistorna.")
+# --- 📋 CHECKLISTOR ---
+st.divider()
+st.subheader("📋 Snabba Kontroller (Från Handboken)")
+c1, c2 = st.columns(2)
+with c1:
+    st.checkbox("NinjaTrader 8 ansluten till live-feed")
+    st.checkbox("Strategi kompilerad med 0 fel")
+with c2:
+    st.checkbox("Daily Loss Limit aktiverad i C#")
+    st.checkbox("Emergency-stop-knappen är testad")
