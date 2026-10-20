@@ -16,7 +16,7 @@ from ai_engine import (
 # 🏢 PROFESSIONAL FINTECH THEMING (DARK MODE & CUSTOM STYLES)
 st.set_page_config(page_title="Smartare ekonomi | AI-finansanalytiker", page_icon="📈", layout="wide")
 
-# Custom CSS för att ge sidan en modern, lyxig fintech-känsla (Neon-grön och mörkt tema)
+# Custom CSS för mörkt, lyxigt fintech-tema
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"] {
@@ -44,9 +44,6 @@ st.markdown("""
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
-    .css-10trblm {
-        color: #00E676;
-    }
     </style>
 """, unsafe_allow_code=True)
 
@@ -55,7 +52,7 @@ supabase_url = os.environ.get("SUPABASE_URL", "")
 supabase_key = os.environ.get("SUPABASE_ANON_KEY", "")
 api_key = os.environ.get("OPENAI_API_KEY", "")
 
-# Initiera sessionshantering för inloggad kund
+# Initiera sessionshantering
 if "user_authenticated" not in st.session_state:
     st.session_state["user_authenticated"] = False
 if "user_email" not in st.session_state:
@@ -64,7 +61,7 @@ if "user_id" not in st.session_state:
     st.session_state["user_id"] = None
 
 # =========================================================
-# 🎛️ NY MODERN SIDOMENY (SIDEBAR) & KONTOSYSTEM
+# 🎛️ SIDEBAR & KONTOSYSTEM
 # =========================================================
 with st.sidebar:
     st.image("https://icons8.com", width=60)
@@ -125,19 +122,16 @@ with st.sidebar:
 # =========================================================
 flik_hemsida, flik_verktyg = st.tabs(["⚡ Premium Dashboard", "🤖 AI-Analysmaskin"])
 
-# --- FLIK 1: EXTREMT PROFFSIG LANDNINGSSIDA ---
+# --- FLIK 1: LANDNINGSSIDA ---
 with flik_hemsida:
     st.markdown("<h1 style='color: #00E676;'>Automatisera dina finansiella insikter</h1>", unsafe_allow_code=True)
     st.markdown("### *Generativ AI möter molnbaserad tidsserieanalys.*")
-    
     st.write(
         "Välkommen till en modern fintech-plattform. Ladda upp ostrukturerade finansiella "
-        "rapporter (PDF/Excel) och låt vår AI bygga upp din historik, räkna ut marginaler och analysera risker automatiskt."
+        "rapporter (PDF/Excel) och låt vår AI bygga upp din historik, råda om vinstmarginal och analysera risker automatiskt."
     )
+    st.divider()
     
-    st.markdown("---")
-    
-    # Snygga features med ikoner
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
         st.markdown("### ⚡ Blixtsnabb Extraktion")
@@ -149,26 +143,23 @@ with flik_hemsida:
         st.markdown("### 📈 Visuella Tidsserier")
         st.warning("De verifierade värdena ritas omedelbart upp i interaktiva diagram som visar tillväxt, trender och lönsamhet.")
 
-    st.markdown("---")
+    st.divider()
     st.subheader("💎 Flexibla medlemskap för tillväxt (Förslag)")
-    
     p_col1, p_col2, p_col3 = st.columns(3)
     with p_col1:
         st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #AEB7C6;'><h4>Freemium</h4><h2>0 kr</h2><p>- 3 analyser/mån<br>- Max 5MB filer<br>- Manuell verifiering</p></div>", unsafe_allow_code=True)
     with p_col2:
         st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #00E676;'><h4>Growth Pro</h4><h2>499 kr</h2><p style='color: #00E676;'><b>Mest populär</b></p><p>- Obegränsade analyser<br>- Full molnhistorik<br>- Automatiserade KPI-diagram</p></div>", unsafe_allow_code=True)
     with p_col3:
-        st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #FFB300;'><h4>Enterprise</h4><h2>Offereras</h2><p>- Egna AI-modeller<br>- ERP-integrationer (Fortnox)<br>- Dedikerad support</p></div>", unsafe_allow_code=True)
+        st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #FFB300;'><h4>Enterprise</h4><h2>Offereras</h2><p>- Egna AI-modeller<br>- ERP-integrationer (Fortnox)<br>- Dedikerad support</p></div>", unsafe_allow_color=True)
 
-# --- FLIK 2: DET SÄKRA AI-VERKTYGET ---
+# --- FLIK 2: VERKTYG (INLOGGNINGSKRAV) ---
 with flik_verktyg:
     if not st.session_state["user_authenticated"]:
         st.markdown("### 🔒 Logga in för att använda AI-Verktyget")
         st.warning("Denna del innehåller konfidentiell datahantering. Vänligen skapa ett konto eller logga in i sidomenyn till vänster för att låsa upp verktyget.")
     else:
         st.markdown(f"### 🤖 Välkommen till din AI-analys, `{st.session_state['user_email']}`")
-        
-        # Ange API-nyckel manuellt om miljövariabel saknas
         if not api_key:
             api_key = st.text_input("OpenAI API-nyckel", type="password", key="main_openai_key")
             
@@ -190,23 +181,29 @@ with flik_verktyg:
             st.subheader(f"📋 AI-Analysresultat: {st.session_state['analysis_file']}")
             st.markdown(st.session_state["analysis_output"])
             
-        # 📊 SKARPA INTERAKTIVA KPI-KORT & GRAPH-MODUL
+        # 📊 INTERAKTIVA DIAGRAM FRÅN SUPABASE
         st.divider()
         st.subheader("📊 Dina Sparade Företagsdata")
         
         if supabase_url and supabase_key:
             try:
                 sb_client = initiera_supabase(supabase_url, supabase_key)
-                # Vi skickar med unikt user_id så kunden BARA hämtar sin EGEN data!
                 db_data = hamta_historik_fran_supabase(sb_client, st.session_state["user_id"])
                 
                 if not db_data.empty:
-                    # Beräkna totalsummor för snygga KPI-kort högst upp
                     senaste_rad = db_data.iloc[-1]
-                    
                     kpi1, kpi2, kpi3 = st.columns(3)
                     with kpi1:
                         st.metric("Senaste Omsättning", f"{senaste_rad['revenue']:,.0f} kr")
                     with kpi2:
                         st.metric("Senaste Vinst/Förlust", f"{senaste_rad['profit']:,.0f} kr")
                     with kpi3:
+                        st.metric("Vinstmarginal", f"{senaste_rad['profit_margin']:.1f} %")
+                    
+                    st.write("")
+                    graf_col1, graf_col2 = st.columns(2)
+                    with graf_col1:
+                        st.markdown("**Omsättningstrend per period**")
+                        st.bar_chart(db_data, x="period", y="revenue", color="#00E676")
+                    with graf_col2:
+                        st.markdown("**Resultatutveckling (Vinst/Förlust)**")
