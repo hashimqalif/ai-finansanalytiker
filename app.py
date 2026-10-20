@@ -47,12 +47,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_code=True)
 
-# Initiera Supabase-anslutning
+# Initiera Supabase-anslutning säkert
 supabase_url = os.environ.get("SUPABASE_URL", "")
 supabase_key = os.environ.get("SUPABASE_ANON_KEY", "")
 api_key = os.environ.get("OPENAI_API_KEY", "")
 
-# Initiera sessionshantering
+# Initiera sessionshantering säkert
 if "user_authenticated" not in st.session_state:
     st.session_state["user_authenticated"] = False
 if "user_email" not in st.session_state:
@@ -78,37 +78,52 @@ with st.sidebar:
         
         if konto_val == "Logga in":
             if st.button("Logga in", type="primary", use_container_width=True):
-                if supabase_url and supabase_key:
-                    sb = initiera_supabase(supabase_url, supabase_key)
-                    res = logga_in_anvandare(sb, email_input, password_input)
-                    if res["status"] == "Success":
-                        st.session_state["user_authenticated"] = True
-                        st.session_state["user_email"] = email_input
-                        st.session_state["user_id"] = res["user_id"]
-                        st.success("Välkommen tillbaka!")
-                        st.rerun()
+                if email_input and password_input:
+                    if supabase_url and supabase_key:
+                        try:
+                            sb = initiera_supabase(supabase_url, supabase_key)
+                            res = logga_in_anvandare(sb, email_input, password_input)
+                            if res["status"] == "Success":
+                                st.session_state["user_authenticated"] = True
+                                st.session_state["user_email"] = email_input
+                                st.session_state["user_id"] = res["user_id"]
+                                st.success("Välkommen tillbaka!")
+                                st.rerun()
+                            else:
+                                st.error(res["meddelande"])
+                        except Exception as e:
+                            st.error(f"Inloggningsfel: {str(e)}")
                     else:
-                        st.error(res["meddelande"])
+                        st.warning("System: Databasnycklar saknas i inställningarna.")
                 else:
-                    st.warning("System: Databaskoppling saknas.")
+                    st.warning("Vänligen fyll i både e-post och lösenord.")
         else:
             if st.button("Skapa säkert konto", type="primary", use_container_width=True):
-                if supabase_url and supabase_key:
-                    sb = initiera_supabase(supabase_url, supabase_key)
-                    res = registrera_anvandare(sb, email_input, password_input)
-                    if res["status"] == "Success":
-                        st.success("Konto skapat! Du kan nu logga in.")
+                if email_input and password_input:
+                    if supabase_url and supabase_key:
+                        try:
+                            sb = initiera_supabase(supabase_url, supabase_key)
+                            res = registrera_anvandare(sb, email_input, password_input)
+                            if res["status"] == "Success":
+                                st.success("Konto skapat! Du kan nu logga in.")
+                            else:
+                                st.error(res["meddelande"])
+                        except Exception as e:
+                            st.error(f"Registreringsfel: {str(e)}")
                     else:
-                        st.error(res["meddelande"])
+                        st.warning("System: Databasnycklar saknas i inställningarna.")
                 else:
-                    st.warning("System: Databaskoppling saknas.")
+                    st.warning("Vänligen fyll i både e-post och lösenord.")
     else:
         st.markdown(f"🟢 **Inloggad som:**\n`{st.session_state['user_email']}`")
         st.caption("Ditt konto är helt isolerat och krypterat.")
         if st.button("🔒 Logga ut", use_container_width=True):
-            if supabase_url and supabase_key:
-                sb = initiera_supabase(supabase_url, supabase_key)
-                logga_out_anvandare(sb)
+            try:
+                if supabase_url and supabase_key:
+                    sb = initiera_supabase(supabase_url, supabase_key)
+                    logga_out_anvandare(sb)
+            except Exception:
+                pass
             st.session_state["user_authenticated"] = False
             st.session_state["user_email"] = None
             st.session_state["user_id"] = None
@@ -167,14 +182,17 @@ with flik_verktyg:
         
         if uploaded_file is not None:
             if st.button("🔥 Starta Djupanalys", type="primary"):
-                try:
-                    report = parse_financial_file(uploaded_file.name, uploaded_file.getvalue())
-                    with st.spinner("AI-motorn analyserar rapporten..."):
-                        analysis = analyze_report(report, api_key)
-                        st.session_state["analysis_output"] = analysis
-                        st.session_state["analysis_file"] = uploaded_file.name
-                except Exception as e:
-                    st.error(str(e))
+                if api_key:
+                    try:
+                        report = parse_financial_file(uploaded_file.name, uploaded_file.getvalue())
+                        with st.spinner("AI-motorn analyserar rapporten..."):
+                            analysis = analyze_report(report, api_key)
+                            st.session_state["analysis_output"] = analysis
+                            st.session_state["analysis_file"] = uploaded_file.name
+                    except Exception as e:
+                        st.error(str(e))
+                else:
+                    st.warning("Vänligen ange din OpenAI API-nyckel för att köra analysen.")
                     
         if "analysis_output" in st.session_state:
             st.divider()
@@ -186,24 +204,5 @@ with flik_verktyg:
         st.subheader("📊 Dina Sparade Företagsdata")
         
         if supabase_url and supabase_key:
+            db_data = pd.DataFrame()
             try:
-                sb_client = initiera_supabase(supabase_url, supabase_key)
-                db_data = hamta_historik_fran_supabase(sb_client, st.session_state["user_id"])
-                
-                if not db_data.empty:
-                    senaste_rad = db_data.iloc[-1]
-                    kpi1, kpi2, kpi3 = st.columns(3)
-                    with kpi1:
-                        st.metric("Senaste Omsättning", f"{senaste_rad['revenue']:,.0f} kr")
-                    with kpi2:
-                        st.metric("Senaste Vinst/Förlust", f"{senaste_rad['profit']:,.0f} kr")
-                    with kpi3:
-                        st.metric("Vinstmarginal", f"{senaste_rad['profit_margin']:.1f} %")
-                    
-                    st.write("")
-                    graf_col1, graf_col2 = st.columns(2)
-                    with graf_col1:
-                        st.markdown("**Omsättningstrend per period**")
-                        st.bar_chart(db_data, x="period", y="revenue", color="#00E676")
-                    with graf_col2:
-                        st.markdown("**Resultatutveckling (Vinst/Förlust)**")
