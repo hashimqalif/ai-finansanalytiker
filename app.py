@@ -10,7 +10,7 @@ from ai_engine import (
     hamta_historik_fran_supabase,
     registrera_anvandare,
     logga_in_anvandare,
-    logga_ut_anvandare
+    logga_out_anvandare
 )
 
 # 🏢 PROFESSIONAL FINTECH THEMING (DARK MODE & CUSTOM STYLES)
@@ -149,9 +149,9 @@ with flik_hemsida:
     with p_col1:
         st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #AEB7C6;'><h4>Freemium</h4><h2>0 kr</h2><p>- 3 analyser/mån<br>- Max 5MB filer<br>- Manuell verifiering</p></div>", unsafe_allow_code=True)
     with p_col2:
-        st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #00E676;'><h4>Growth Pro</h4><h2>499 kr</h2><p style='color: #00E676;'><b>Mest populär</b></p><p>- Obegränsade analyser<br>- Full molnhistorik<br>- Automatiserade KPI-diagram</p></div>", unsafe_allow_code=True)
+        st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #00E676;'><h4>Growth Pro</h4><h2>499 kr</h2><p style='color: #00E676;'><b>Mest populär</b></p><p>- Obegränsade analyser<br>- Full molnhistorik<br>- Automatiserade KPI-diagram</p></div>", unsafe_allow_color=True)
     with p_col3:
-        st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #FFB300;'><h4>Enterprise</h4><h2>Offereras</h2><p>- Egna AI-modeller<br>- ERP-integrationer (Fortnox)<br>- Dedikerad support</p></div>", unsafe_allow_color=True)
+        st.markdown("<div style='background-color: #1A1F2C; padding: 20px; border-radius: 10px; border-left: 5px solid #FFB300;'><h4>Enterprise</h4><h2>Offereras</h2><p>- Egna AI-modeller<br>- ERP-integrationer (Fortnox)<br>- Dedikerad support</p></div>", unsafe_allow_code=True)
 
 # --- FLIK 2: VERKTYG (INLOGGNINGSKRAV) ---
 with flik_verktyg:
